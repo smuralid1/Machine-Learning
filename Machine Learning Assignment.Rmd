@@ -1,0 +1,235 @@
+---
+title: "Machine Learning Assignment"
+author: "Muralidharan S"
+date: "February 24, 2016"
+output: html_document
+---
+
+
+```{r global_options, include=FALSE}
+set.seed(1000)
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+
+
+###Introduction
+Six participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. We have data for the 6 participants from accelerometers on the belt, forearm, arm, and dumbell. There is a variable "Classe" in the dataset which tells the manner in which the six participants did the exercise. 
+
+Class A - exactly according to the specification. 
+Class B - throwing the elbows to the front. 
+Class C - lifting the dumbbell only halfway. 
+Class D - lowering the dumbbell only halfway. 
+Class E - throwing the hips to the front.
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+The objective of the project is to develop a model to predict the class of people given a set of measurements/readings from the accelometer. 
+
+###Data Collection
+
+The training and the test data sets are collected. The model development and training will be done on the training dataset and so the test set is aside and is only used when predicting values for the 20 cases.
+
+
+```{r}
+set.seed(100)
+training<-read.csv("pml-training.csv",na.strings = c(""," ","NA"))
+testing<-read.csv("pml-testing.csv",na.strings = c(""," ","NA"))
+```
+
+
+###Splitting the training data set
+
+Now the training dataset is split into 2. One is used for model training and development and the other is used as validation/hold out dataset.
+
+
+```{r}
+set.seed(101)
+library(caret)
+inTrain<-createDataPartition(y=training$classe,p=0.7,list = FALSE)
+training_train<-training[inTrain,]
+training_test<-training[-inTrain,]
+```
+
+
+###Covariate creation
+
+The first step is to look at variables that have close to zero variance and thereby do not contribute the prediction of the dependent variable in any way. These variables are better removed from the model.
+```{r}
+set.seed(102)
+training_train_zv<-nearZeroVar(training_train,saveMetrics = FALSE)
+training_train_2<-training_train[,-c(training_train_zv)]
+```
+
+The vector "training_train_zv" has the variable positions which have nearly zero variance and can be removed from the training set.
+
+The next step is to look at variables which have missing data. 
+
+```{r}
+set.seed(103)
+Missing_data <- function(x){sum(is.na(x))/length(x)*100}
+apply(training_train_2,2,Missing_data)
+```
+
+There are many variables/features with more than 95% missing data in it. These variables are not going to contribute to the prediction of the dependent variable in a meaningful way. So we will remove these variables.
+
+
+```{r}
+set.seed(104)
+missing_train_pos<-which(colSums(is.na(training_train_2))>0)
+training_train_3<-training_train_2[,-c(missing_train_pos)]
+```
+
+
+Finally three additional variables are removed from the model. They are X, UserName and Numwindow.
+
+```{r}
+set.seed(105)
+training_train_4<-training_train_3[,-c(1,2,6)]
+```
+
+Doing the same processing on the dataset for the validation/hold out set as well below.
+
+```{r}
+set.seed(106)
+training_test_2<-training_test[,-c(training_train_zv)]
+training_test_3<-training_test_2[,-c(missing_train_pos)]
+training_test_4<-training_test_3[,-c(1,2,6)]
+```
+
+
+
+###Preprocessing
+
+As there are a lot of correlated predictor variables we will use the principal component analysis method to bring down the number of variables. We will use the option method="pca" in the train function in the caret package. The skewness in the individual variables can be removed by centering and scaling the variables. The "pca" method does the centering and scaling as well.
+
+
+```{r}
+set.seed(107)
+correlation<-abs(cor(training_train_4[,c(-1,-2,-3,-56)]))
+diag(correlation)<-0
+which(correlation>0.8,arr.ind = T)
+```
+
+
+
+###Plotting the predictors
+
+It is important to plot the predictors to understand the variablility of the variables for each class or response. Also the plots help us understand the outliers and variables that are very skewed.
+
+```{r}
+set.seed(108)
+library(Rmisc)
+plot1<-qplot(classe,roll_forearm,data = training_train_4,fill=classe,geom=c("boxplot"))
+plot2<-qplot(classe,pitch_forearm,data = training_train_4,fill=classe,geom=c("boxplot"))
+plot3<-qplot(classe,yaw_forearm,data = training_train_4,fill=classe,geom=c("boxplot"))
+plot4<-qplot(classe,roll_dumbbell,data = training_train_4,fill=classe,geom=c("boxplot"))
+library(Rmisc)
+multiplot(plot1,plot2,plot3,plot4,cols = 2)
+```
+
+
+###Model training and Selection
+
+The first step in building and training a model is to choose the most appropriate method to train. As the response is one of five classes this is one of classification problems. Classification with regression tree is the most appropriate method.
+
+
+####Model 1
+```{r}
+set.seed(109)
+modfit_rpart<-train(classe~.,data = training_train_4,method="rpart",preProcess=c("center","scale"))
+```
+
+
+####Model 2
+```{r}
+set.seed(110)
+modfit_rpart_2<-train(classe~.,data = training_train_4,method="rpart",preProcess=c("pca"))
+```
+
+
+####Model 3
+```{r}
+set.seed(111)
+modfit_bagging<-train(classe~.,data = training_train_4,method="treebag",preProcess=c("pca"))
+```
+
+Model 1 uses "rpart" method (Recursive Partioning and Regression Trees).The preprocessing is pca.
+
+Model 2 uses "rpart" method but the preprocessing is standardisation.
+
+Model 3 uses "treebag" method. This is Bagging method wherein several models are created using bootstrapping and then the models are averaged to get an aggregate model. Bagging is an extension of"rpart" algorithm.
+
+We will look at the accuracy of the models using confusion matrix.
+
+
+
+####Confusion Matrix for Model 1
+
+```{r}
+set.seed(112)
+pred_train_test_rpart<-predict(modfit_rpart,training_test_4[,-56])
+confusionMatrix(pred_train_test_rpart,training_test_4$classe)
+```
+
+
+
+####Confusion Matrix for Model 2
+
+```{r}
+set.seed(113)
+pred_train_test_rpart_2<-predict(modfit_rpart_2,training_test_4[,-56])
+confusionMatrix(pred_train_test_rpart,training_test_4$classe)
+```
+
+
+
+####Confusion Matrix for Model 3
+
+```{r}
+set.seed(114)
+pred_train_test_bagging<-predict(modfit_bagging,training_test_4[,-56])
+confusionMatrix(pred_train_test_bagging,training_test_4$classe)
+```
+
+
+The third model is the best model and so we will go with this model.
+
+
+Cross validation is done by validating the model built on the training dataset in the validation/hold out dataset.
+
+###Error rate
+In sample error rate is the misclassification rate in the training data set and out of sample error rate is the misclassification rate in the hold out data set.
+
+
+####In sample error rate
+```{r}
+set.seed(116)
+pred_train_train<-predict(modfit_bagging,training_train_4[,-56])
+table(pred_train_train,training_train_4$classe)
+```
+
+In sample error rate = 
+```{r}
+set.seed(117)
+library(scales)
+insample<-table(pred_train_train,training_train_4$classe)
+percent((sum(insample)-sum(diag(insample)))/sum(insample))
+```
+
+
+####Out of sample error rate
+```{r}
+set.seed(118)
+pred_train_test<-predict(modfit_bagging,training_test_4[,-56])
+table(pred_train_test,training_test_4$classe)
+```
+
+
+Out of sample error rate = 
+```{r}
+set.seed(119)
+outsample<-table(pred_train_test,training_test_4$classe)
+percent((sum(outsample)-sum(diag(outsample)))/sum(outsample))
+```
+
